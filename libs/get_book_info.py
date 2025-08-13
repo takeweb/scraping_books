@@ -1,10 +1,69 @@
 import re
-
+import os
 import requests
 from bs4 import BeautifulSoup
 
+def fetch_google_books_info(isbn):
+    """
+    Google Books APIからISBNで書籍情報を取得
+    """
+    api_url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}"
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as e:
+        print(f"Google Books APIへのアクセス中にエラーが発生しました: {e}")
+        return None
 
-def scrape_amazon_product_details(url):
+    items = data.get("items")
+    if not items:
+        print("該当する書籍が見つかりませんでした。")
+        return None
+
+    volume_info = items[0].get("volumeInfo", {})
+    industry_ids = volume_info.get("industryIdentifiers", [])
+    isbn_10 = isbn_13 = ""
+    for idinfo in industry_ids:
+        if idinfo.get("type") == "ISBN_10":
+            isbn_10 = idinfo.get("identifier", "")
+        elif idinfo.get("type") == "ISBN_13":
+            isbn_13 = idinfo.get("identifier", "")
+
+    # サブタイトルはなければN/A
+    subtitle = volume_info.get("subtitle", "N/A")
+
+    # 著者はリストで返る
+    authors = volume_info.get("authors", [])
+    authors_str = ", ".join(authors) if authors else "N/A"
+
+    # 出版社
+    publisher = volume_info.get("publisher", "N/A")
+    # 発売日
+    published_date = volume_info.get("publishedDate", "N/A")
+    # ページ数
+    page_count = volume_info.get("pageCount", 0)
+
+    # 価格はAPIからは取得できない場合が多いのでN/A
+    price = "N/A"
+
+    product_details = {
+        "タイトル": volume_info.get("title", "N/A"),
+        "サブタイトル": subtitle,
+        "著者": authors_str,
+        "出版社": publisher,
+        "発売日": published_date,
+        "ページ数": f"{page_count}ページ" if page_count else "N/A",
+        "ISBN-10": isbn_10,
+        "ISBN-13": isbn_13,
+        "価格": price,
+    }
+    return product_details
+
+
+def scrape_amazon_product_details(isbn):
+    url = f"https://www.amazon.co.jp/dp/{isbn}"
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
@@ -206,18 +265,34 @@ def print_book_info(book_info):
 
 def extract_isbn_fields(book_info):
     """必要なSQL用フィールドを整形"""
+    # 価格がN/Aや空の場合は0を返す
+    price_str = book_info.get("価格", "￥0").replace("￥", "").replace(",", "").strip()
+    if not price_str or price_str.upper() == "N/A":
+        price = 0
+    else:
+        try:
+            price = int(price_str)
+        except Exception:
+            price = 0
+
+    # ページ数がN/Aや空の場合は0を返す
+    pages_str = book_info.get("ページ数", "0ページ").replace("ページ", "").strip()
+    if not pages_str or pages_str.upper() == "N/A":
+        pages = 0
+    else:
+        try:
+            pages = int(pages_str)
+        except Exception:
+            pages = 0
+
     return {
         "title": sanitize(book_info.get("タイトル", "")),
         "sub_title": sanitize(book_info.get("サブタイトル", "").split("–")[0].strip()),
-        "price": int(
-            book_info.get("価格", "￥0").replace("￥", "").replace(",", "").strip() or 0
-        ),
+        "price": price,
         "isbn_13": book_info.get("ISBN-13", "").replace("-", ""),
         "isbn_10": book_info.get("ISBN-10", ""),
         "release_date": book_info.get("発売日", "").replace("/", "-"),
-        "pages": int(
-            book_info.get("ページ数", "0ページ").replace("ページ", "").strip() or 0
-        ),
+        "pages": pages,
         "cover_image": book_info.get("ISBN-13", "").replace("-", "") + ".jpg",
     }
 
@@ -242,6 +317,8 @@ def out_sql_insert_to_file(values, filename="output.sql"):
     """SQL INSERT文をファイルに出力"""
     if values:
         try:
+            # ディレクトリがなければ作成
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(
                     "INSERT INTO public.books(title, publisher_id, price, isbn, isbn_10, sub_title, edition, release_date, format_id, pages, book_cover_image_name, created_at)\n"
