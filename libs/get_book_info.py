@@ -2,6 +2,7 @@ import re
 import os
 import requests
 from bs4 import BeautifulSoup
+from libs.supabase_client import supabase
 
 def fetch_google_books_info(isbn):
     """
@@ -62,6 +63,11 @@ def fetch_google_books_info(isbn):
 
 
 def scrape_amazon_product_details(isbn):
+    """Amazonの書籍ページから書籍情報をスクレイピング
+    ISBNを使ってAmazonの書籍ページにアクセスし、必要な情報を抽出する。
+    ISBNは日本の書籍用にフォーマットされている必要がある。
+    """
+    # ISBNを使ってAmazonの書籍ページにアクセス
     url = f"https://www.amazon.co.jp/dp/{isbn}"
     
     headers = {
@@ -294,23 +300,13 @@ def extract_isbn_fields(book_info):
         "release_date": book_info.get("発売日", "").replace("/", "-"),
         "pages": pages,
         "cover_image": book_info.get("ISBN-13", "").replace("-", "") + ".jpg",
+        "publisher": book_info.get("出版社", ""),
     }
 
 
 def sanitize(s: str) -> str:
     """SQL用にシングルクオートなどをエスケープ"""
     return s.replace("'", "''")
-
-
-def out_sql_insert(values):
-    """SQL INSERT文を出力"""
-    if values:
-        print("\n--- SQL INSERT 文 ---\n")
-        print(
-            "INSERT INTO public.books(title, publisher_id, price, isbn, isbn_10, sub_title, edition, release_date, format_id, pages, book_cover_image_name, created_at)"
-        )
-        print("VALUES")
-        print("    " + ",\n    ".join(values) + ";")
 
 
 def out_sql_insert_to_file(values, filename="output.sql"):
@@ -328,3 +324,30 @@ def out_sql_insert_to_file(values, filename="output.sql"):
             print(f"\n✅ SQL文を {filename} に出力しました。")
         except Exception as e:
             print(f"SQLファイル書き込み時にエラー: {e}")
+
+def gen_sql_insert_books_values(fields, PUBLISHER_ID=14, FORMAT_ID=4):
+    """SQL INSERT文のVALUESの中身を生成"""
+
+    publisher_id = PUBLISHER_ID
+    format_id = FORMAT_ID
+
+    publisher_id = get_publisher_id_from_supabase(fields["publisher"])
+    
+    sql = f"('{fields['title']}', {publisher_id}, {fields['price']}, '{fields['isbn_13']}', '{fields['isbn_10']}', '{fields['sub_title']}', null, '{fields['release_date']}', {format_id}, {fields['pages']}, '{fields['cover_image']}', CURRENT_TIMESTAMP)"
+    return sql
+
+def get_publisher_id_from_supabase(publisher_name):
+    """
+    Supabaseのpublic.publishersテーブルからpublisher_nameでidを取得
+    """
+    try:
+        response = supabase.table("publishers").select("id").eq("publisher_name", publisher_name).execute()
+        data = response.data
+        if data and len(data) > 0:
+            return data[0]["id"]
+        else:
+            print(f"Supabaseに該当出版社が見つかりません: {publisher_name}")
+            return None
+    except Exception as e:
+        print(f"Supabase検索中にエラー: {e}")
+        return None

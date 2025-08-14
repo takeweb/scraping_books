@@ -6,10 +6,8 @@ from libs.get_book_info import (
     print_book_info,
     fetch_google_books_info,
     scrape_amazon_product_details,
+    gen_sql_insert_books_values
 )
-
-PUBLISHER_ID = 14
-FORMAT_ID = 4
 
 def main():
     values = []
@@ -43,7 +41,7 @@ def main():
                 book_info = fetch_google_books_info(isbn)
                 print_book_info(book_info)
                 fields = extract_isbn_fields(book_info)
-                sql = f"('{fields['title']}', {PUBLISHER_ID}, {fields['price']}, '{fields['isbn_13']}', '{fields['isbn_10']}', '{fields['sub_title']}', null, '{fields['release_date']}', {FORMAT_ID}, {fields['pages']}, '{fields['cover_image']}', CURRENT_TIMESTAMP)"
+                sql = gen_sql_insert_books_values(fields)
                 values.append(sql)
             except Exception as e:
                 print(f"ISBN {isbn} の情報取得中にエラー: {e}")
@@ -53,7 +51,7 @@ def main():
                 book_info = scrape_amazon_product_details(isbn)
                 print_book_info(book_info)
                 fields = extract_isbn_fields(book_info)
-                sql = f"('{fields['title']}', {PUBLISHER_ID}, {fields['price']}, '{fields['isbn_13']}', '{fields['isbn_10']}', '{fields['sub_title']}', null, '{fields['release_date']}', {FORMAT_ID}, {fields['pages']}, '{fields['cover_image']}', CURRENT_TIMESTAMP)"
+                sql = gen_sql_insert_books_values(fields)
                 values.append(sql)
             except Exception as e:
                 print(f"ISBN {isbn} の情報取得中にエラー: {e}")
